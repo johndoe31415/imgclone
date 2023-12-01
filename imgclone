@@ -121,8 +121,8 @@ class ImageCloner():
 		asyncio.run(self._run(considered))
 		subprocess.check_call([ "sync" ])
 		t1 = time.time()
-		tsec = t1 - t0
-		print(f"Finished after {tsec:.0f} secs")
+		tsec = round(t1 - t0)
+		print(f"Finished after {tsec // 60}:{tsec % 60:02d} minutes:secs")
 
 		return 0
 
