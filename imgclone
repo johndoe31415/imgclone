@@ -25,6 +25,7 @@ import re
 import subprocess
 import asyncio
 import time
+import json
 from FriendlyArgumentParser import FriendlyArgumentParser
 
 class ImageCloner():
@@ -47,6 +48,15 @@ class ImageCloner():
 				if self._args.verbose >= 3:
 					print(f"Found disk: {result}")
 				yield result
+
+	def _check_mounted(self, dev_name):
+		lsblk = json.loads(subprocess.check_output([ "lsblk", "-J", dev_name ]))
+		for blockdev in lsblk["blockdevices"]:
+			for child in blockdev["children"]:
+				for mountpoint in child["mountpoints"]:
+					if mountpoint is not None:
+						return (child["name"], mountpoint)
+		return None
 
 	def _resolve_name(self, dev):
 		stdout = subprocess.check_output([ "hwinfo", "--disk", f"--only={dev}" ]).decode()
@@ -81,11 +91,15 @@ class ImageCloner():
 			if self._args.verbose >= 2:
 				print(f"Resolved disk: {disk}")
 
-			if (disk["name"] in self._args.disk_name) and (disk["blocks"] in self._args.disk_size):
+			mounted = self._check_mounted(disk["dev"])
+			if (disk["name"] in self._args.disk_name) and (disk["blocks"] in self._args.disk_size) and (mounted is not None):
+				print(f"Warning: potential match {disk['dev']} rejected because partition {mounted[0]} mounted at {mounted[1]}", file = sys.stderr)
+
+			if (disk["name"] in self._args.disk_name) and (disk["blocks"] in self._args.disk_size) and (mounted is None):
 				considered.append(disk)
 			else:
 				if self._args.verbose >= 1:
-					print(f"{disk['name']} not matched: name {'matches' if (disk['name'] in self._args.disk_name) else 'does not match'}, size {'matches' if (disk['blocks'] in self._args.disk_size) else 'does not match'}")
+					print(f"{disk['name']} not matched: name {'matches' if (disk['name'] in self._args.disk_name) else 'does not match'}, size {'matches' if (disk['blocks'] in self._args.disk_size) else 'does not match'}, {'not mounted' if (mounted is None) else f'partition {mounted[0]} mounted at {mounted[1]}'}")
 
 		if len(considered) == 0:
 			print("Error: No disks found to consider.")
@@ -115,7 +129,7 @@ class ImageCloner():
 parser = FriendlyArgumentParser(description = "Clone a disk image onto multiple USB sticks at the same time.")
 parser.add_argument("-d", "--dryrun", action = "store_true", help = "Do not write anything, only show what was found.")
 parser.add_argument("-p", "--parallel", metavar = "count", type = int, default = 4, help = "How many dd processes to run concurrently. Defaults to %(default)d.")
-parser.add_argument("-n", "--disk-name", metavar = "name", action = "append", default = [ ], require = True, help = "Disk name to require. Can be specified multiple times for different acceptable options. Must match that of hdparm -i. Required argument.")
+parser.add_argument("-n", "--disk-name", metavar = "name", action = "append", default = [ ], required = True, help = "Disk name to require. Can be specified multiple times for different acceptable options. Must match that of hdparm -i. Required argument.")
 parser.add_argument("-s", "--disk-size", metavar = "blocks", type = int, action = "append", default = [ ], required = True, help = "Disk size to enforce, in blocks. Must match that in /proc/partitions. Can be specified multiple times for different acceptable options. Required argument.")
 parser.add_argument("-r", "--disk-regex", metavar = "regex", default = "sd[a-z]", help = "Disk devicename regex to consider. Defaults to %(default)s.")
 parser.add_argument("-v", "--verbose", action = "count", default = 0, help = "Increases verbosity. Can be specified multiple times to increase.")
